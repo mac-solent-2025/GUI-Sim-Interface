@@ -45,8 +45,8 @@ Copy
 python main.py
 Note: Replace main.py with the appropriate filename if different.
 
-Contributing
+## Contributing
 Contributions are welcome. Please adhere to the repository guidelines and submit a pull request for any improvements or fixes.
 
-License
+## License
 A licensing section will be added at a later stage.
