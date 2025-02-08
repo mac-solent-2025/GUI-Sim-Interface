@@ -53,11 +53,21 @@ class DynauticsGUI:
         messagebox.showinfo("All Stop", "All engines set to 0.")
 
     def start_navigation(self):
+        """
+        Starts the navigation data stream from the Dynautics controller.
+        """
+        self.controller.send_nmea_command("CCNVO,2,1.0,0,0.0")  # Now includes checksum
         self.controller.running = True
         threading.Thread(target=self.controller._read_loop, daemon=True).start()
 
+
     def stop_navigation(self):
+        """
+        Stops the navigation data stream from the Dynautics controller.
+        """
+        self.controller.send_nmea_command("CCNVO,0,1.0,0,0.0")  # Now includes checksum
         self.controller.running = False
+
 
     def update_navigation_display(self, message):
         """ Update the GUI with the latest NMEA data """

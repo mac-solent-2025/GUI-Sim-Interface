@@ -19,24 +19,58 @@ class DynauticsController:
         # Start a background thread for reading NMEA messages
         self.read_thread = threading.Thread(target=self._read_loop, daemon=True)
         self.read_thread.start()
+        
+    def send_nmea_command(self, command_body):
+        """
+        Send an NMEA command to the Dynautics controller.
+        The checksum is calculated and appended automatically.
+        """
+        checksum = self.calculate_nmea_checksum(command_body)
+        command_str = f"${command_body}*{checksum:02X}\r\n"
+
+        try:
+            self.ser.write(command_str.encode('ascii'))
+            self.ser.flush()  # Ensures immediate transmission
+            print(f"Sent NMEA command: {command_str.strip()}")
+        except Exception as e:
+            print(f"Error sending NMEA command: {e}")
+
+
+
 
     def send_motor_command(self, port_val, starboard_val):
         """
-        Send motor commands to the Dynautics controller.
-        Values should be between -100 and 100.
+        Send motor commands to the Dynautics controller in NMEA format.
+        Format: $CCMCO,0.0,<port_val>,<starboard_val>*<checksum>
         """
-        # Validate input values
         if not (-100 <= port_val <= 100 and -100 <= starboard_val <= 100):
-            raise ValueError("Motor values must be between -100 and 100.")
-        
-        # Format the command as required by your controller protocol.
-        # This example assumes a simple comma-separated command.
-        command_str = f"MOTOR,{port_val},{starboard_val}\n"
+            print("⚠️ ERROR: Motor values out of range")
+            return
+
+        # Format the command as required: $CCMCO,0.0,50.00,-50.00
+        command_body = f"CCMCO,0.0,{port_val:.2f},{starboard_val:.2f}"
+
+        # Calculate checksum correctly
+        checksum = self.calculate_nmea_checksum(command_body)  
+
+        # Format the full NMEA command
+        command_str = f"${command_body}*{checksum:02X}\r\n"
+
         try:
             self.ser.write(command_str.encode('ascii'))
-            print(f"Sent command: {command_str.strip()}")
+            self.ser.flush()  # Ensure data is sent immediately
+            print(f"Sent command: {command_str.strip()}")  # Debug print
         except Exception as e:
             print(f"Error sending command: {e}")
+
+    def calculate_nmea_checksum(self, sentence):
+        """
+        Calculate NMEA checksum (XOR of all characters in the message, excluding '$' and '*')
+        """
+        checksum = 0
+        for char in sentence:  # Loops through characters in the sentence
+            checksum ^= ord(char)
+        return checksum
 
     def _read_loop(self):
         """Continuously read from the serial port and process incoming data."""
