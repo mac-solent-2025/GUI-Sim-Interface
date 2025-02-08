@@ -24,26 +24,27 @@ Please refer to the [requirements.txt](requirements.txt) file for the complete l
 1. **Clone the repository:**
 
    ```bash
-   git clone https://github.com/yourusername/MAC-Simulator-Controller.git
+   git clone https://github.com/mac-solent-2025/GUI-Sim-Interface.git
 Navigate to the project directory:
 
-bash
-Copy
-cd MAC-Simulator-Controller
+   ```bash
+   cd GUI-Sim_Interface
+   ```
 Install the required dependencies:
 
-bash
-Copy
-pip install -r requirements.txt
+   ```bash
+   pip install -r requirements.txt
+   ```
+
 Usage
 Launch the application using Python. The GUI will open, allowing you to select the desired serial port (default is COM4) and input engine thrust values. The application also enables starting and stopping the navigation data stream from the ShipSim simulators.
 
 To run the application, execute:
 
-bash
-Copy
-python main.py
-Note: Replace main.py with the appropriate filename if different.
+   ```bash
+   Copy
+   python TxRx_gui.py
+   ```
 
 ## Contributing
 Contributions are welcome. Please adhere to the repository guidelines and submit a pull request for any improvements or fixes.
