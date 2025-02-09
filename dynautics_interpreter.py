@@ -15,10 +15,16 @@ class DynauticsController:
         # For thread-safe data sharing
         self.nmea_callbacks = []
         self.running = True
+        self.read_thread = threading.Thread(target=self._read_loop, daemon=True)  # ✅ Initialize `read_thread`
 
-        # Start a background thread for reading NMEA messages
-        self.read_thread = threading.Thread(target=self._read_loop, daemon=True)
-        self.read_thread.start()
+
+    def start_reading(self):
+        """ Starts the NMEA read loop in a separate thread. """
+        if not hasattr(self, "read_thread") or not self.read_thread.is_alive():  # ✅ Check if thread exists
+            self.running = True
+            self.read_thread = threading.Thread(target=self._read_loop, daemon=True)
+            self.read_thread.start()
+
         
     def send_nmea_command(self, command_body):
         """
@@ -34,7 +40,6 @@ class DynauticsController:
             print(f"Sent NMEA command: {command_str.strip()}")
         except Exception as e:
             print(f"Error sending NMEA command: {e}")
-
 
 
 
@@ -127,6 +132,7 @@ class DynauticsController:
 if __name__ == '__main__':
     # Instantiate the controller interface
     controller = DynauticsController(port='COM4', baudrate=115200, timeout=1)
+    
 
     # Define a simple callback to process NMEA messages
     def process_nmea(message):
@@ -145,3 +151,5 @@ if __name__ == '__main__':
         print("Interrupted by user.")
     finally:
         controller.stop()
+        
+
