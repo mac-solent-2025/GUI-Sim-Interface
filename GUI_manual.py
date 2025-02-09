@@ -102,14 +102,14 @@ class DynauticsGUI:
     def all_stop(self):
         self.controller.send_motor_command(0, 0)
 
-    def start_navigation(self):
+    def start_navigation(self): # This is confusing should probably change this to start nav DATA - JS
         """
         Starts the navigation stream and listens for an ACK.
         Runs in a separate thread to prevent freezing.
         """
         threading.Thread(target=self.send_nvo_command, args=("CCNVO,2,1.0,0,0.0",), daemon=True).start()
 
-    def stop_navigation(self):
+    def stop_navigation(self): # this is confusing should probably change this to stop nav DATA - JS
         """
         Stops the navigation stream without waiting for an ACK.
         Runs in a separate thread to prevent freezing.
