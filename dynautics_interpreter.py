@@ -123,8 +123,8 @@ class DynauticsController:
     def stop(self):
         """Stop the read loop and close the serial port."""
         self.running = False
-        if self.read_thread.is_alive():
-            self.read_thread.join()
+        if hasattr(self, "read_thread") and self.read_thread.is_alive():
+            self.read_thread.join(timeout=1)  # Avoid indefinite blocking
         self.ser.close()
         print("Serial port closed.")
 

@@ -10,6 +10,7 @@ def normalize_angle(angle):
         angle -= 360
     while angle < -180:
         angle += 360
+    print(f"Normalized Angle: {angle}°")  # Debugging
     return angle
 
 class SteeringGUI:
@@ -55,10 +56,20 @@ class SteeringGUI:
             ttk.Label(root, text=f"{key}:").grid(row=row_index, column=0, sticky="e", padx=5, pady=2)
             ttk.Label(root, textvariable=var, relief="sunken", width=25).grid(row=row_index, column=1, sticky="w", padx=5, pady=2)
             row_index += 1
+            
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+
         
         self.controller = DynauticsController(port='COM4', baudrate=115200)
         self.controller.register_nmea_callback(self.update_navigation_display)
         self.running = False
+    
+    def on_closing(self):
+        """Gracefully stop threads and close the GUI"""
+        self.running = False
+        if hasattr(self, "controller"):
+            self.controller.stop()
+        self.root.destroy()
     
     def update_navigation_display(self, message):
         try:
@@ -90,17 +101,19 @@ class SteeringGUI:
             throttle = self.throttle.get()
             
             error = normalize_angle(target_heading - current_heading)
-            print(f"Heading Error: {error}°")
+            print(f"Target: {target_heading}°, Current: {current_heading}°, Error: {error}°")
+
             
             base_speed = throttle
             adjustment = (abs(error) / 90.0) * min(50, abs(throttle))
             
-            if error > 0:
-                port_thrust = base_speed - adjustment
-                starboard_thrust = base_speed + adjustment
-            else:
+            if error > 0:  # Need to turn starboard (right)
                 port_thrust = base_speed + adjustment
                 starboard_thrust = base_speed - adjustment
+            else:  # Need to turn port (left)
+                port_thrust = base_speed - adjustment
+                starboard_thrust = base_speed + adjustment
+
             
             port_thrust = max(min(port_thrust, 100), -100)
             starboard_thrust = max(min(starboard_thrust, 100), -100)
