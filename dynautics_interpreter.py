@@ -1,34 +1,47 @@
 import serial
 import threading
 import time
+import sys
+import queue  # Import the queue module
 
 class DynauticsController:
-    def __init__(self, port='COM4', baudrate=115200, timeout=1):
-        # Open the serial port; adjust baudrate/timeout as needed
-        try:
-            self.ser = serial.Serial(port, baudrate, timeout=timeout)
-            print(f"Opened serial port {port} at {baudrate} baud.")
-        except Exception as e:
-            print(f"Error opening serial port {port}: {e}")
-            raise
+    def __init__(self, port='COM4', baudrate=115200, timeout=1, retries=3, retry_delay=1):
+        self.ser = None
+        self.port = port
+        self.baudrate = baudrate
+        self.timeout = timeout
+        self.retries = retries
+        self.retry_delay = retry_delay
 
-        # For thread-safe data sharing
-        self.nmea_callbacks = []
+        for attempt in range(self.retries):
+            try:
+                self.ser = serial.Serial(port, baudrate, timeout=timeout)
+                print(f"Opened serial port {port} at {baudrate} baud.")
+                break  # Exit the loop if successful
+            except Exception as e:
+                print(f"Error opening serial port {port} (attempt {attempt + 1}/{retries}): {e}")
+                if attempt < retries - 1:
+                    print(f"Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                else:
+                    print(f"Failed to open serial port {port} after multiple retries.  Exiting.")
+                    sys.exit(1)
+
         self.running = True
-        self.read_thread = threading.Thread(target=self._read_loop, daemon=True)  # ✅ Initialize `read_thread`
+        self.read_thread = threading.Thread(target=self._read_loop, daemon=True)
+        self.nmea_queue = queue.Queue()  # Create the queue for NMEA messages
 
 
     def start_reading(self):
         """ Starts the NMEA read loop in a separate thread. """
-        if not hasattr(self, "read_thread") or not self.read_thread.is_alive():  # ✅ Check if thread exists
+        if not self.running:  # Simpler check
             self.running = True
             self.read_thread = threading.Thread(target=self._read_loop, daemon=True)
             self.read_thread.start()
 
-        
-    def send_nmea_command(self, command_body):
+    def send_command(self, command_body):
         """
-        Send an NMEA command to the Dynautics controller.
+        Send a NMEA command to the Dynautics controller.
         The checksum is calculated and appended automatically.
         """
         checksum = self.calculate_nmea_checksum(command_body)
@@ -38,10 +51,10 @@ class DynauticsController:
             self.ser.write(command_str.encode('ascii'))
             self.ser.flush()  # Ensures immediate transmission
             print(f"Sent NMEA command: {command_str.strip()}")
+            return True # Indicate Success
         except Exception as e:
             print(f"Error sending NMEA command: {e}")
-
-
+            return False # Indicate Failure
 
     def send_motor_command(self, port_val, starboard_val):
         """
@@ -50,30 +63,15 @@ class DynauticsController:
         """
         if not (-100 <= port_val <= 100 and -100 <= starboard_val <= 100):
             print("⚠️ ERROR: Motor values out of range")
-            return
+            return False
 
-        # Format the command as required: $CCMCO,0.0,50.00,-50.00
         command_body = f"CCMCO,0.0,{port_val:.2f},{starboard_val:.2f}"
+        return self.send_command(command_body)
 
-        # Calculate checksum correctly
-        checksum = self.calculate_nmea_checksum(command_body)  
-
-        # Format the full NMEA command
-        command_str = f"${command_body}*{checksum:02X}\r\n"
-
-        try:
-            self.ser.write(command_str.encode('ascii'))
-            self.ser.flush()  # Ensure data is sent immediately
-            print(f"Sent command: {command_str.strip()}")  # Debug print
-        except Exception as e:
-            print(f"Error sending command: {e}")
 
     def calculate_nmea_checksum(self, sentence):
-        """
-        Calculate NMEA checksum (XOR of all characters in the message, excluding '$' and '*')
-        """
         checksum = 0
-        for char in sentence:  # Loops through characters in the sentence
+        for char in sentence:
             checksum ^= ord(char)
         return checksum
 
@@ -83,73 +81,30 @@ class DynauticsController:
         while self.running:
             try:
                 # Read data from the serial port (non-blocking read)
-                if self.ser.in_waiting:
+                if self.ser.in_waiting:  # Check if data is available
                     data = self.ser.read(self.ser.in_waiting).decode('ascii', errors='ignore')
                     buffer += data
 
-                    # Process complete lines (assuming \n terminated messages)
-                    while '\n' in buffer:
-                        line, buffer = buffer.split('\n', 1)
+                    # Process complete lines (assuming \r\n terminated messages)
+                    while '\r\n' in buffer:
+                        line, buffer = buffer.split('\r\n', 1)
                         line = line.strip()
                         if line:
                             self._handle_nmea_message(line)
-                else:
-                    # Sleep briefly to yield control
-                    time.sleep(0.1)
+
+            except serial.SerialException as e:  # Catch Serial-specific exceptions
+                print(f"Serial port error: {e}")
+                self.running = False  # Stop the loop on serial error
+                break  # Exit the loop
             except Exception as e:
                 print(f"Error reading from serial port: {e}")
-                time.sleep(1)
+                time.sleep(0.1)  # Short delay on non-serial errors
+            time.sleep(0.01)
 
     def _handle_nmea_message(self, message):
-        """
-        Handle the received NMEA (or proprietary) message.
-        Here you can parse it and notify any subscribers.
-        """
+        """Handle the received NMEA (or proprietary) message and enqueue it."""
         print(f"Received NMEA message: {message}")
-        # Notify all registered callback functions
-        for callback in self.nmea_callbacks:
-            try:
-                callback(message)
-            except Exception as e:
-                print(f"Error in callback: {e}")
+        self.nmea_queue.put(message)  # Put the message in the queue
 
-    def register_nmea_callback(self, callback):
-        """
-        Register a callback to receive NMEA messages.
-        The callback should accept one parameter (the message string).
-        """
-        self.nmea_callbacks.append(callback)
 
-    def stop(self):
-        """Stop the read loop and close the serial port."""
-        self.running = False
-        if hasattr(self, "read_thread") and self.read_thread.is_alive():
-            self.read_thread.join(timeout=1)  # Avoid indefinite blocking
-        self.ser.close()
-        print("Serial port closed.")
-
-# Example usage:
-if __name__ == '__main__':
-    # Instantiate the controller interface
-    controller = DynauticsController(port='COM4', baudrate=115200, timeout=1)
-    
-
-    # Define a simple callback to process NMEA messages
-    def process_nmea(message):
-        # You can add custom parsing or pass this on to another module
-        print(f"Callback processing message: {message}")
-
-    controller.register_nmea_callback(process_nmea)
-
-    try:
-        # Example: send a motor command for port and starboard
-        controller.send_motor_command(50, -50)
-        
-        # Run for a while to capture messages (simulate continuous operation)
-        time.sleep(10)
-    except KeyboardInterrupt:
-        print("Interrupted by user.")
-    finally:
-        controller.stop()
-        
-
+    def
