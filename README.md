@@ -30,7 +30,7 @@ Please refer to the [requirements.txt](requirements.txt) file for the complete l
    ```bash
    cd GUI-Sim_Interface
    ```
-3 .Create a envirement preferable 3.10:
+3. Create a envirement preferable 3.10:
 
    ```bash
    python -m venv .venv
