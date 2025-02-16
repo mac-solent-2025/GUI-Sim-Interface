@@ -4,7 +4,6 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from waypoint_navigation import VesselNavigator
 
-
 class NMEA_GUI:
     def __init__(self, root):
         self.root = root
@@ -13,7 +12,7 @@ class NMEA_GUI:
         # Serial Port Selection
         self.serial_port = tk.StringVar()
         ttk.Label(root, text="Select COM Port:").grid(row=0, column=0, padx=5, pady=5)
-        self.port_menu = ttk.Combobox(root, textvariable=self.serial_port, values=["COM3", "COM4", "COM5", "COM6"])
+        self.port_menu = ttk.Combobox(root, textvariable=self.serial_port, values=["COM4", "COM4", "COM5", "COM6"])
         self.port_menu.grid(row=0, column=1, padx=5, pady=5)
         self.port_menu.current(0)
         
@@ -42,9 +41,12 @@ class NMEA_GUI:
         self.stop_nav_button = ttk.Button(root, text="Stop Navigation Data", command=self.stop_navigation)
         self.stop_nav_button.grid(row=6, column=1, pady=5)
 
+
         self.vessel_navigator: VesselNavigator = VesselNavigator(
-            serial_port=self.serial_port.get()
+            serial_connection = serial.Serial("COM4", 115200, timeout=1)
         )
+
+        self.vessel_navigator.setup()
 
     def all_stop(self):
         self.vessel_navigator.send_nmea_command("$CCMCO,0.0,0.00,0.00")

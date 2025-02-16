@@ -11,7 +11,7 @@ from exception import OperationalException
 
 class VesselNavigator:
     def __init__(self,
-                 serial_port: str,
+                 serial_connection,
                  baud_rate: int = 115200,
                  acceptance_radius: float = 3.0,
                  lookhead_distance: float = 10.0):
@@ -26,12 +26,11 @@ class VesselNavigator:
         self.lookhead_distance = lookhead_distance
         self.current_waypoint_index = 0
         self.waypoints: List[Waypoint] = []
-        self.serial_port = serial_port
 
         self.baud_rate = baud_rate
-
-        self.serial_connection = None
         self.running = False
+
+        self.serial_connection=serial_connection
 
     def load_waypoints_from_file(self, waypoint_file_path: str):
         with open(waypoint_file_path, 'r', encoding='utf-8') as f:
@@ -45,6 +44,9 @@ class VesselNavigator:
         self.current_waypoint_index = 0
 
 
+    def setup(self):
+        self.load_waypoints_from_file("waypoints.txt")
+
     def add_waypoint(self, waypoint: Waypoint):
         """Add list of waypoints (latitude, longitude pairs)"""
         self.waypoints.append(waypoint)
@@ -53,6 +55,8 @@ class VesselNavigator:
     def get_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
         """Calculate distance between two points using Haversine formula"""
         R = 6371000  # Earth radius in meters
+
+        print(f"{type(lat1)} , {type(lat2)}")
 
         phi1 = math.radians(lat1)
         phi2 = math.radians(lat2)
@@ -99,9 +103,9 @@ class VesselNavigator:
         msg = pynmea2.parse(nmea_sentence)
 
         waypoint = Waypoint()
-        waypoint.latitude = msg.latitude
-        waypoint.longitude = msg.longitude
-        waypoint.name = msg.waypoint_name
+        waypoint.latitude = msg.lat
+        waypoint.longitude = msg.lon
+        waypoint.name = msg.waypoint_id
 
         return waypoint
 
@@ -127,8 +131,8 @@ class VesselNavigator:
         current_lon = rms_message.longitude
         current_heading = rms_message.heading
 
-        target_lat = target_waypoint.latitude
-        target_lon = target_waypoint.longitude
+        target_lat = float(target_waypoint.latitude)
+        target_lon = float(target_waypoint.longitude)
 
 
         # Check if we've reached the current waypoint
@@ -164,64 +168,52 @@ class VesselNavigator:
         right_thrust = base_thrust + thrust_difference
         
         # Clamp values between -100 and 100
-        left_thrust = max(-100, min(100, left_thrust))
-        right_thrust = max(-100, min(100, right_thrust))
+        left_thrust = float(max(-100, min(100, left_thrust)))
+        right_thrust = float(max(-100, min(100, right_thrust)))
         
         return left_thrust, right_thrust
 
     def run_navigation_loop(self):
         """Main navigation loop"""
-        with serial.Serial(self.serial_port, self.baud_rate, timeout=1) as ser:
-            while True:
-                try:
-                    # Read GPS data
-                    if ser.in_waiting:
-                        line = ser.readline().decode('ascii', errors='replace')
-                        if line.startswith('$GPRMC'):
-                            # Parse GPS data
-                            rmc_message: RMC_Message = self.parse_gps_data(line)
+        while self.running:
+            try:
+                # Read GPS data
+                if self.serial_connection.in_waiting:
+                    line = self.serial_connection.readline().decode('ascii', errors='replace')
+                    if line.startswith('$GPRMC'):
+                        # Parse GPS data
+                        rmc_message: RMC_Message = self.parse_gps_data(line)
 
-                            # Calculate control signals
-                            port_thrust, starboard_thrust = self.calculate_control_signals(
-                                rmc_message
-                            )
+                        # Calculate control signals
+                        port_thrust, starboard_thrust = self.calculate_control_signals(
+                            rmc_message
+                        )
 
-                            # Apply control signals to thrusters
-                            self.send_engine_command(
-                                port_thrust_power=port_thrust,
-                                starboard_thrust_power=starboard_thrust
-                            )
+                        # Apply control signals to thrusters
+                        self.send_engine_command(
+                            port_thrust_power=port_thrust,
+                            starboard_thrust_power=starboard_thrust
+                        )
 
-                            # Optional: Log navigation data
-                            print(f"Position: ({rmc_message.latitude}, {rmc_message.longitude}), "
-                                  f"Heading: {rmc_message.heading}°, "
-                                  f"Thrust L/R: {port_thrust:.2f}/{starboard_thrust:.2f}")
+                        # Optional: Log navigation data
+                        print(f"Position: ({rmc_message.latitude}, {rmc_message.longitude}), "
+                              f"Heading: {rmc_message.heading}°, "
+                              f"Thrust L/R: {port_thrust:.2f}/{starboard_thrust:.2f}")
 
-                        elif line.startswith('$TTTTM'):
-                            ttm_message = self.parse_ttm_data(line)
+                    elif line.startswith('$TTTTM'):
+                        ttm_message = self.parse_ttm_data(line)
 
-                            print('TTM Message received')
-                            print(ttm_message)
+                        print('TTM Message received')
+                        print(ttm_message)
 
-                except Exception as e:
-                    print(f"Error in navigation loop: {e}")
-                    continue
+            except Exception as e:
+                print(f"Error in navigation loop: {e}")
+                continue
 
-                time.sleep(0.1)  # Prevent CPU overload
+            time.sleep(0.1)  # Prevent CPU overload
 
-    def open_serial_connection(self):
-        try:
-            self.serial_connection = serial.Serial(self.serial_port.get(), 115200, timeout=1)
-
-        except serial.SerialException:
-            return False
-
-        return True
 
     def send_nmea_command(self, command):
-        if not self.serial_connection:
-            if not self.open_serial_connection():
-                return
         checksum = 0
         for char in command[1:]:
             checksum ^= ord(char)
