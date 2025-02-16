@@ -74,25 +74,47 @@ class NMEA_GUI:
         self.nav_data.set(f"{pos_str} | Heading: {heading:.2f}° | Speed: {speed:.2f} kn")
         self.current_heading_str.set(f"Current Heading: {heading:.2f}°")
         
-        # If there is at least one waypoint, compute distance and bearing.
+        # If there's at least one waypoint available...
         if self.vessel_navigator.waypoints and self.vessel_navigator.current_waypoint_index < len(self.vessel_navigator.waypoints):
             wp = self.vessel_navigator.waypoints[self.vessel_navigator.current_waypoint_index]
             self.waypoint_label.set(f"Waypoint: {wp.name} ({wp.latitude:.6f}, {wp.longitude:.6f})")
             if status["lat"] is not None and status["lon"] is not None:
-                distance = waypoints.get_distance([status["lat"], status["lon"]], [float(wp.latitude), float(wp.longitude)])
-                bearing = waypoints.get_bearing([status["lat"], status["lon"]], [float(wp.latitude), float(wp.longitude)])
+                # Compute distance and bearing from current position to waypoint.
+                distance = waypoints.get_distance([status["lat"], status["lon"]],
+                                                [float(wp.latitude), float(wp.longitude)])
+                bearing = waypoints.get_bearing([status["lat"], status["lon"]],
+                                                [float(wp.latitude), float(wp.longitude)])
                 self.distance_label.set(f"Distance: {distance:.2f} m")
                 self.bearing_label.set(f"Bearing: {bearing:.2f}°")
                 
-                # For testing, you can hard code a desired heading:
-                desired_heading = bearing  # or replace with "bearing" if you want to use waypoint bearing
+                # Check if within acceptance radius: if so, advance to the next waypoint.
+                if distance < self.vessel_navigator.acceptance_radius:
+                    self.vessel_navigator.current_waypoint_index += 1
+                    if self.vessel_navigator.current_waypoint_index < len(self.vessel_navigator.waypoints):
+                        wp = self.vessel_navigator.waypoints[self.vessel_navigator.current_waypoint_index]
+                        target_lat = float(wp.latitude)
+                        target_lon = float(wp.longitude)
+                        distance = waypoints.get_distance([status["lat"], status["lon"]],
+                                                        [target_lat, target_lon])
+                        bearing = waypoints.get_bearing([status["lat"], status["lon"]],
+                                                        [target_lat, target_lon])
+                        self.waypoint_label.set(f"Waypoint: {wp.name} ({wp.latitude:.6f}, {wp.longitude:.6f})")
+                        self.distance_label.set(f"Distance: {distance:.2f} m")
+                        self.bearing_label.set(f"Bearing: {bearing:.2f}°")
+                    else:
+                        self.waypoint_label.set("Waypoint: N/A")
+                        self.distance_label.set("Distance: N/A")
+                        self.bearing_label.set("Bearing: N/A")
+                
+                # For testing, use the computed bearing as the desired heading.
+                desired_heading = bearing  # Or hard-code (e.g., 152) for testing.
                 self.desired_heading_str.set(f"Desired Heading: {desired_heading:.2f}°")
                 
-                # Compute the heading error using the AutoController.
+                # Compute heading error using the PID controller's helper.
                 error = self.auto_controller.compute_circular_error(desired_heading, heading)
                 self.heading_error_str.set(f"Heading Error: {error:.2f}°")
                 
-                # Optionally, update PID and get debug values (here we use the actual send command callback)
+                # Update auto control (which sends engine commands).
                 err, corr, base, port, starboard = self.auto_controller.update_auto_control(
                     desired_heading, heading, speed, self.vessel_navigator.send_nmea_command)
                 self.pid_debug.set(f"PID: Err {err:.2f}, Corr {corr:.2f}, Base {base:.2f}")
@@ -102,6 +124,7 @@ class NMEA_GUI:
             self.bearing_label.set("Bearing: N/A")
         
         self.root.after(100, self.update_gui)
+
 
     def start_navigation(self):
         self.vessel_navigator.start_navigation()
