@@ -101,10 +101,38 @@ class DynauticsController:
                 time.sleep(0.1)  # Short delay on non-serial errors
             time.sleep(0.01)
 
+
+        
     def _handle_nmea_message(self, message):
-        """Handle the received NMEA (or proprietary) message and enqueue it."""
         print(f"Received NMEA message: {message}")
-        self.nmea_queue.put(message)  # Put the message in the queue
+        if "HDT" in message:  # Check if the message contains "HDT"
+            print("!!! Received an HDT message !!!")
+        self.nmea_queue.put(message)
 
+    def stop(self):
+        """Stop the read loop and close the serial port."""
+        self.running = False
+        if hasattr(self, "read_thread") and self.read_thread.is_alive():
+            self.read_thread.join(timeout=1)  # Avoid indefinite blocking
+        if self.ser: # check if self.ser has been initialised
+            self.ser.close()
+        print("Serial port closed.")
 
-    def
+if __name__ == '__main__':
+    # --- Example Usage (for testing DynauticsController independently) ---
+    controller = DynauticsController(port='COM4', baudrate=115200, timeout=1)
+    controller.start_reading()  #  Start the reading thread!
+
+    try:
+        # Send a test motor command
+        controller.send_motor_command(20, -20)
+        time.sleep(1) #Give it a second to send
+
+        # Keep the main thread alive to allow the reading thread to run
+        # You can add more test commands here, or just wait.
+        time.sleep(60)  # Run for 60 seconds
+
+    except KeyboardInterrupt:
+        print("Interrupted by user.")
+    finally:
+        controller.stop() # Ensure serial port is closed
