@@ -22,6 +22,10 @@ class RMC_Message(NMEA):
     heading: str = None
 
 @dataclass
+class TTM_Message(NMEA):
+    pass
+
+@dataclass
 class Waypoint:
     latitude: str = None
     longitude: str = None

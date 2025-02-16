@@ -5,7 +5,7 @@ import serial
 import pynmea2
 from typing import List, Tuple
 import time
-from model import NMEA, RMC_Message, Waypoint
+from model import NMEA, RMC_Message, TTM_Message, Waypoint
 from constants import RMC, ROT, HDT
 from exception import OperationalException
 
@@ -104,7 +104,14 @@ class VesselNavigator:
         waypoint.name = msg.waypoint_name
 
         return waypoint
-    
+
+    def parse_ttm_data(self, nmea_sentence: str) -> TTM_Message:
+        msg = pynmea2.parse(nmea_sentence)
+
+        message = TTM_Message()
+
+        return message
+
     def calculate_control_signals(self, rms_message: RMC_Message) -> Tuple[float, float]:
         """
         Calculate control signals for the vessel's propellers
@@ -172,11 +179,11 @@ class VesselNavigator:
                         line = ser.readline().decode('ascii', errors='replace')
                         if line.startswith('$GPRMC'):
                             # Parse GPS data
-                            rms_message = self.parse_gps_data(line)
+                            rmc_message: RMC_Message = self.parse_gps_data(line)
 
                             # Calculate control signals
                             port_thrust, starboard_thrust = self.calculate_control_signals(
-                                rms_message
+                                rmc_message
                             )
 
                             # Apply control signals to thrusters
@@ -186,9 +193,15 @@ class VesselNavigator:
                             )
 
                             # Optional: Log navigation data
-                            print(f"Position: ({rms_message.latitude}, {rms_message.longitude}), "
-                                  f"Heading: {rms_message.heading}°, "
+                            print(f"Position: ({rmc_message.latitude}, {rmc_message.longitude}), "
+                                  f"Heading: {rmc_message.heading}°, "
                                   f"Thrust L/R: {port_thrust:.2f}/{starboard_thrust:.2f}")
+
+                        elif line.startswith('$TTTTM'):
+                            ttm_message = self.parse_ttm_data(line)
+
+                            print('TTM Message received')
+                            print(ttm_message)
 
                 except Exception as e:
                     print(f"Error in navigation loop: {e}")
