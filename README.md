@@ -25,33 +25,12 @@ Please refer to the [requirements.txt](requirements.txt) file for the complete l
 
    ```bash
    git clone https://github.com/mac-solent-2025/GUI-Sim-Interface.git
-2. Navigate to the project directory:
+Navigate to the project directory:
 
    ```bash
    cd GUI-Sim_Interface
    ```
-3. Create a envirement preferable 3.10:
-
-   ```bash
-   python -m venv .venv
-   ```
-   For Mac / Linux:
-   ```bash
-   python3 -m venv .venv
-   ```
-
-4. Activate the envirement:
-
-   ```bash
-   .\.venv\Scripts\activate
-   ```
-   
-   For Mac / Linux:
-   ```bash
-   source .venv\bin\activate
-   ```
-
-5. Install the required dependencies:
+Install the required dependencies:
 
    ```bash
    pip install -r requirements.txt
@@ -63,6 +42,7 @@ Launch the application using Python. The GUI will open, allowing you to select t
 To run the application, execute:
 
    ```bash
+   Copy
    python TxRx_gui.py
    ```
 
