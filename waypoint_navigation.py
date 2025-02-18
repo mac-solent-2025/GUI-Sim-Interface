@@ -1,5 +1,5 @@
+# waypoint_navigation.py
 from datetime import datetime
-import math
 from threading import Thread
 import serial
 import pynmea2
@@ -8,6 +8,16 @@ import time
 from model import NMEA, RMC_Message, TTM_Message, Waypoint
 from constants import RMC, ROT, HDT
 from exception import OperationalException
+import waypoints  # Module with get_distance and get_bearing
+
+def convert_dm_to_decimal(dm_value, direction):
+    """
+    Convert a ddmm.mmmm string to decimal degrees and fix the sign.
+    """
+    value = pynmea2.dm_to_sd(dm_value)
+    if direction.upper() in ('S', 'W'):
+        return -abs(value)
+    return abs(value)
 
 class VesselNavigator:
     def __init__(self,
@@ -16,203 +26,108 @@ class VesselNavigator:
                  acceptance_radius: float = 3.0,
                  lookhead_distance: float = 10.0):
         """
-        Initialize the navigation system
-        
-        Args:
-            acceptance_radius: Distance in meters to consider waypoint reached
-            lookhead_distance: Distance to look ahead on path for steering
+        Initialize the navigation system.
         """
         self.acceptance_radius = acceptance_radius
         self.lookhead_distance = lookhead_distance
         self.current_waypoint_index = 0
         self.waypoints: List[Waypoint] = []
-
         self.baud_rate = baud_rate
         self.running = False
+        self.serial_connection = serial_connection
 
-        self.serial_connection=serial_connection
+        # These attributes hold the latest parsed NMEA data.
+        self.current_lat = 0.0
+        self.current_lon = 0.0
+        self.current_heading = 0.0
+        self.current_speed = 0.0
 
     def load_waypoints_from_file(self, waypoint_file_path: str):
         with open(waypoint_file_path, 'r', encoding='utf-8') as f:
             while line := f.readline():
                 waypoint_sentence = line.rstrip()
-
                 waypoint = self.parse_waypoint_data(waypoint_sentence)
-
                 self.add_waypoint(waypoint)
-
         self.current_waypoint_index = 0
-
 
     def setup(self):
         self.load_waypoints_from_file("waypoints.txt")
 
     def add_waypoint(self, waypoint: Waypoint):
-        """Add list of waypoints (latitude, longitude pairs)"""
+        """Add a waypoint (latitude, longitude, and name)."""
         self.waypoints.append(waypoint)
         self.current_waypoint_index = 0
 
-    def get_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-        """Calculate distance between two points using Haversine formula"""
-        R = 6371000  # Earth radius in meters
-
-        print(f"{type(lat1)} , {type(lat2)}")
-
-        phi1 = math.radians(lat1)
-        phi2 = math.radians(lat2)
-        delta_phi = math.radians(lat2 - lat1)
-        delta_lambda = math.radians(lon2 - lon1)
-        
-        a = (math.sin(delta_phi/2) * math.sin(delta_phi/2) +
-             math.cos(phi1) * math.cos(phi2) *
-             math.sin(delta_lambda/2) * math.sin(delta_lambda/2))
-        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-        
-        return R * c
-    
-    def get_bearing(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-        """Calculate bearing between two points"""
-        lat1 = math.radians(lat1)
-        lat2 = math.radians(lat2)
-        diff_long = math.radians(lon2 - lon1)
-        
-        x = math.sin(diff_long) * math.cos(lat2)
-        y = (math.cos(lat1) * math.sin(lat2) -
-             math.sin(lat1) * math.cos(lat2) * math.cos(diff_long))
-        
-        initial_bearing = math.atan2(x, y)
-        initial_bearing = math.degrees(initial_bearing)
-        
-        return (initial_bearing + 360) % 360
-    
     def parse_gps_data(self, nmea_sentence: str) -> RMC_Message:
-        """Parse GPRMC sentence and return current position and heading"""
+        """Parse a GPRMC sentence and return current position and heading (in decimal degrees)."""
         msg = pynmea2.parse(nmea_sentence)
         if not isinstance(msg, pynmea2.RMC):
             raise ValueError("Not a GPRMC sentence")
-
         rmc_message = RMC_Message()
-        rmc_message.latitude = msg.latitude
-        rmc_message.longitude = msg.longitude
+        rmc_message.latitude = convert_dm_to_decimal(msg.lat, msg.lat_dir)
+        rmc_message.longitude = convert_dm_to_decimal(msg.lon, msg.lon_dir)
         rmc_message.speed = msg.spd_over_grnd
         rmc_message.heading = msg.true_course if msg.true_course else 0
-
         return rmc_message
 
     def parse_waypoint_data(self, nmea_sentence: str) -> Waypoint:
+        """Parse an NMEA-formatted waypoint sentence and immediately convert coordinates."""
         msg = pynmea2.parse(nmea_sentence)
-
         waypoint = Waypoint()
-        waypoint.latitude = msg.lat
-        waypoint.longitude = msg.lon
+        waypoint.latitude = convert_dm_to_decimal(msg.lat, msg.lat_dir)
+        waypoint.longitude = convert_dm_to_decimal(msg.lon, msg.lon_dir)
         waypoint.name = msg.waypoint_id
-
         return waypoint
 
     def parse_ttm_data(self, nmea_sentence: str) -> TTM_Message:
         msg = pynmea2.parse(nmea_sentence)
-
         message = TTM_Message()
-
         return message
 
-    def calculate_control_signals(self, rms_message: RMC_Message) -> Tuple[float, float]:
-        """
-        Calculate control signals for the vessel's propellers
-        Returns: (left_thrust, right_thrust) as values between -1 and 1
-        """
-        if not self.waypoints or self.current_waypoint_index >= len(self.waypoints):
-            return 0, 0
+    def start_parsing(self):
+        """Start a background thread that continuously parses incoming NMEA data."""
+        self.running = True
+        thread = Thread(target=self._nmea_loop, daemon=True)
+        thread.start()
 
-        # current_lat, current_lon = current_pos
-        target_waypoint = self.waypoints[self.current_waypoint_index]
-
-        current_lat = rms_message.latitude
-        current_lon = rms_message.longitude
-        current_heading = rms_message.heading
-
-        target_lat = float(target_waypoint.latitude)
-        target_lon = float(target_waypoint.longitude)
-
-
-        # Check if we've reached the current waypoint
-        distance_to_waypoint = self.get_distance(
-            current_lat,
-            current_lon,
-            target_lat,
-            target_lon
-        )
-
-        if distance_to_waypoint < self.acceptance_radius:
-            self.current_waypoint_index += 1
-            if self.current_waypoint_index >= len(self.waypoints):
-                return 0, 0  # Stop at final waypoint
-            target_lat, target_lon = self.waypoints[self.current_waypoint_index]
-        
-        # Calculate desired heading
-        desired_heading = self.get_bearing(current_lat, current_lon, target_lat, target_lon)
-        
-        # Calculate heading error (-180 to +180 degrees)
-        heading_error = ((desired_heading - current_heading + 180) % 360) - 180
-        
-        # Calculate thrust commands based on heading error
-        # Simple P controller for demonstration
-        K_p = 0.5  # Proportional gain
-        thrust_difference = (K_p * (heading_error / 180.0)) * 100  # Normalized to [-1, 1]
-        
-        # Base forward thrust
-        base_thrust = 70  # 70% forward thrust
-        
-        # Calculate individual motor thrusts
-        left_thrust = base_thrust - thrust_difference
-        right_thrust = base_thrust + thrust_difference
-        
-        # Clamp values between -100 and 100
-        left_thrust = float(max(-100, min(100, left_thrust)))
-        right_thrust = float(max(-100, min(100, right_thrust)))
-        
-        return left_thrust, right_thrust
-
-    def run_navigation_loop(self):
-        """Main navigation loop"""
+    def _nmea_loop(self):
         while self.running:
-            try:
-                # Read GPS data
-                if self.serial_connection.in_waiting:
-                    line = self.serial_connection.readline().decode('ascii', errors='replace')
-                    if line.startswith('$GPRMC'):
-                        # Parse GPS data
-                        rmc_message: RMC_Message = self.parse_gps_data(line)
-
-                        # Calculate control signals
-                        port_thrust, starboard_thrust = self.calculate_control_signals(
-                            rmc_message
-                        )
-
-                        # Apply control signals to thrusters
-                        self.send_engine_command(
-                            port_thrust_power=port_thrust,
-                            starboard_thrust_power=starboard_thrust
-                        )
-
-                        # Optional: Log navigation data
-                        print(f"Position: ({rmc_message.latitude}, {rmc_message.longitude}), "
-                              f"Heading: {rmc_message.heading}°, "
-                              f"Thrust L/R: {port_thrust:.2f}/{starboard_thrust:.2f}")
-
-                    elif line.startswith('$TTTTM'):
-                        ttm_message = self.parse_ttm_data(line)
-
-                        print('TTM Message received')
-                        print(ttm_message)
-
-            except Exception as e:
-                print(f"Error in navigation loop: {e}")
-                continue
-
-            time.sleep(0.1)  # Prevent CPU overload
+            if self.serial_connection.in_waiting:
+                line = self.serial_connection.readline().decode('ascii', errors='replace').strip()
+                try:
+                    msg = pynmea2.parse(line)
+                    if msg.sentence_type == "RMC":
+                        self.current_lat = convert_dm_to_decimal(msg.lat, msg.lat_dir)
+                        self.current_lon = convert_dm_to_decimal(msg.lon, msg.lon_dir)
+                        try:
+                            self.current_speed = float(msg.spd_over_grnd)
+                        except (ValueError, TypeError):
+                            pass
+                        # Remove or comment out this block so heading is not updated from RMC:
+                        # try:
+                        #     self.current_heading = float(msg.true_course)
+                        # except (ValueError, TypeError):
+                        #     pass
+                    elif msg.sentence_type == "HDT":
+                        try:
+                            self.current_heading = float(msg.heading)
+                        except (ValueError, TypeError):
+                            pass
+                except pynmea2.nmea.ParseError:
+                    pass
+            time.sleep(0.05)
 
 
+    def get_status(self):
+        """Return the current navigation status as a dictionary."""
+        return {
+            "lat": self.current_lat,
+            "lon": self.current_lon,
+            "speed": self.current_speed,
+            "heading": self.current_heading,
+        }
+
+    # Existing methods for sending commands remain unchanged.
     def send_nmea_command(self, command):
         checksum = 0
         for char in command[1:]:
@@ -221,25 +136,9 @@ class VesselNavigator:
         self.serial_connection.write(command_str.encode())
         print(f"Sent: {command_str.strip()}")
 
+    def start_navigation(self):
+        self.send_nmea_command("$CCNVO,2,1.0,0,0.0")
+
     def stop_navigation(self):
         self.running = False
         self.send_nmea_command("$CCNVO,0,1.0,0,0.0")
-
-    def start_navigation(self):
-        self.send_nmea_command("$CCNVO,2,1.0,0,0.0")
-        self.running = True
-
-        navigator_thread = Thread(target=self.run_navigation_loop, daemon=True)
-        navigator_thread.start()
-
-    def stop_all(self):
-        self.send_nmea_command("$CCMCO,0.0,0.00,0.00")
-
-    def send_engine_command(self, port_thrust_power: float, starboard_thrust_power: float):
-        if not (-100 <= port_thrust_power <= 100 and -100 <= starboard_thrust_power <= 100):
-            raise OperationalException("Engine values must be between -100 and +100")
-
-        command = f"$CCMCO,0.0,{port_thrust_power:.2f},{starboard_thrust_power:.2f}"
-        self.send_nmea_command(command)
-        print(f"Command sent: {command}")
-    
