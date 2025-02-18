@@ -43,7 +43,7 @@ To run the application, execute:
 
    ```bash
    Copy
-   python TxRx_gui.py
+   python TxRx_gui_PID.py
    ```
 
 ## Contributing
