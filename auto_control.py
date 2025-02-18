@@ -1,19 +1,32 @@
-
 from simple_pid import PID
 import numpy as np
+
+# PID Controller Parameters (Kp, Ki, Kd):
+#   Kp (Proportional Gain): Determines how strongly the controller reacts to the current error.
+#   Ki (Integral Gain): Addresses accumulated past errors by integrating the error over time.
+#   Kd (Derivative Gain): Predicts future error based on the rate of change, helping to dampen oscillations.
+
 
 # Tunable Parameters for AutoController
 DEFAULT_HEADING_PID_TUNINGS = (2.0, 0.1, 0.5)
 DEFAULT_SPEED_PID_TUNINGS = (30.0, 0.0, 0.8)
 DEFAULT_SPEED_PID_OUTPUT_LIMITS = (-30, 100)
-DEFAULT_BASE_THRUST = 10
+DEFAULT_BASE_THRUST = 70
 DEFAULT_SAMPLE_TIME = 0.05
 
 # Optional PID tuning adjustment parameters
-HEADING_ERROR_THRESHOLD = 20      # degrees threshold for tuning adjustment
-MINIMUM_BASE_THRUST = 30          # Minimum forward thrust
-MAX_THRUST = 50                   # Maximum thrust for each side
-MIN_THRUST = -50                  # Minimum thrust for each side
+HEADING_ERROR_THRESHOLD = 70      # degrees threshold for tuning adjustment
+MINIMUM_BASE_THRUST = 10          # Minimum forward thrust
+MAX_THRUST = 100                   # Maximum thrust for each side
+MIN_THRUST = -100                  # Minimum thrust for each side
+
+# New global PID tunings for heading control based on error magnitude.
+# Use milder gains when error is small and more aggressive gains when error is large.
+HEADING_PID_TUNINGS_INSIDE_THRESHOLD = (2.0, 0.0, 1.0)    # For errors below the threshold
+HEADING_PID_TUNINGS_OUTSIDE_THRESHOLD = (4.0, 0.0, 1.5)   # For errors above the threshold
+
+DESIRED_SPEED = 5.0 
+
 
 class AutoController:
     def __init__(self,
@@ -39,18 +52,6 @@ class AutoController:
         self.base_thrust = base_thrust
         self.auto_running = False
 
-    def start_auto_control(self):
-        # Set a desired speed (for instance, from a user input field)
-        desired_speed = 2.0  # Replace with your desired value or input reading.
-        self.auto_controller.start_auto_control(desired_speed)
-        self.auto_control_running = True
-
-    def stop_auto_control(self):
-        """
-        Stop automatic control.
-        """
-        self.auto_running = False
-
     def compute_circular_error(self, desired, current):
         """
         Compute the smallest signed angle difference (in degrees) between desired and current headings.
@@ -63,14 +64,16 @@ class AutoController:
     def update_auto_control(self, desired_heading, current_heading, current_speed, send_command_callback):
         error = self.compute_circular_error(desired_heading, current_heading)
         
-        # Optionally adjust PID tunings based on error magnitude.
-        # (You can tweak these values based on testing.)
+        # Adjust PID tunings based on error magnitude.
         if abs(error) < HEADING_ERROR_THRESHOLD:
-            self.heading_pid.tunings = (1, 0, 0)
+            self.heading_pid.tunings = HEADING_PID_TUNINGS_INSIDE_THRESHOLD
         else:
-            self.heading_pid.tunings = (1, 0, 0)
+            self.heading_pid.tunings = HEADING_PID_TUNINGS_OUTSIDE_THRESHOLD
         
         correction = self.heading_pid(-error)
+        
+        # *** Set the speed PID setpoint to your desired speed ***
+        self.speed_pid.setpoint = DESIRED_SPEED
         
         # Use speed PID output if available, or fall back to the base thrust.
         base = self.speed_pid(current_speed) if current_speed is not None else self.base_thrust
@@ -86,3 +89,4 @@ class AutoController:
         send_command_callback(command)
         
         return error, correction, base, port_thrust, starboard_thrust
+

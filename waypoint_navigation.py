@@ -13,7 +13,7 @@ import waypoints  # Module with get_distance and get_bearing
 
 # Tunable Parameters for Vessel Navigation
 DEFAULT_BAUD_RATE = 115200
-DEFAULT_ACCEPTANCE_RADIUS = 3.0     # in meters
+DEFAULT_ACCEPTANCE_RADIUS = 2.0     # in meters
 DEFAULT_LOOKAHEAD_DISTANCE = 10.0     # in meters
 WAYPOINT_FILE_PATH = "waypoints.txt"
 
