@@ -100,25 +100,25 @@ class VesselNavigator:
 
     def _nmea_loop(self):
         while self.running:
-            if self.serial_connection.in_waiting:
+            # Keep reading until no more lines are waiting
+            while self.serial_connection.in_waiting > 0:
                 line = self.serial_connection.readline().decode('ascii', errors='replace').strip()
                 try:
                     msg = pynmea2.parse(line)
                     if msg.sentence_type == "RMC":
                         self.current_lat = convert_dm_to_decimal(msg.lat, msg.lat_dir)
                         self.current_lon = convert_dm_to_decimal(msg.lon, msg.lon_dir)
-                        try:
-                            self.current_speed = float(msg.spd_over_grnd)
-                        except (ValueError, TypeError):
-                            pass
+                        self.current_speed = float(msg.spd_over_grnd) if msg.spd_over_grnd else 0.0
                     elif msg.sentence_type == "HDT":
-                        try:
-                            self.current_heading = float(msg.heading)
-                        except (ValueError, TypeError):
-                            pass
+                        # Print the HDT sentence to the console every time one arrives
+                        print("Got HDT:", line)
+                        self.current_heading = float(msg.heading) if msg.heading else self.current_heading
                 except pynmea2.nmea.ParseError:
                     pass
-            time.sleep(0.05)
+
+            # Sleep briefly so we don’t spin the CPU at 100%
+            time.sleep(0.01)
+
 
     def get_status(self):
         """Return the current navigation status as a dictionary."""

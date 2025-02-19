@@ -10,8 +10,8 @@ from auto_control import AutoController
 # Tunable Parameters for the GUI and serial communication
 SERIAL_PORT = "COM4"
 BAUD_RATE = 115200
-SERIAL_TIMEOUT = 1            # in seconds
-BASE_THRUST = 70              # Initial base thrust for auto control
+SERIAL_TIMEOUT = 0.1            # in seconds
+BASE_THRUST = 100              # Initial base thrust for auto control
 GUI_UPDATE_INTERVAL = 100     # in milliseconds
 class NMEA_GUI:
     def __init__(self, root):
@@ -118,7 +118,8 @@ class NMEA_GUI:
                     error = self.auto_controller.compute_circular_error(desired_heading, heading)
                     self.heading_error_str.set(f"Heading Error: {error:.2f}°")
                     err, corr, base, port, starboard = self.auto_controller.update_auto_control(
-                        desired_heading, heading, speed, self.vessel_navigator.send_nmea_command)
+                        desired_heading, heading, speed, distance, self.vessel_navigator.send_nmea_command)
+
                     self.pid_debug.set(f"PID: Err {err:.2f}, Corr {corr:.2f}, Base {base:.2f}")
                 else:
                     self.pid_debug.set("Navigation stopped")
