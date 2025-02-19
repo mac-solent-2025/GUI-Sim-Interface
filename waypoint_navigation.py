@@ -1,4 +1,5 @@
-# waypoint_navigation.py
+
+
 from datetime import datetime
 from threading import Thread
 import serial
@@ -9,6 +10,12 @@ from model import NMEA, RMC_Message, TTM_Message, Waypoint
 from constants import RMC, ROT, HDT
 from exception import OperationalException
 import waypoints  # Module with get_distance and get_bearing
+
+# Tunable Parameters for Vessel Navigation
+DEFAULT_BAUD_RATE = 115200
+DEFAULT_ACCEPTANCE_RADIUS = 2.0     # in meters
+DEFAULT_LOOKAHEAD_DISTANCE = 10.0     # in meters
+WAYPOINT_FILE_PATH = "waypoints.txt"
 
 def convert_dm_to_decimal(dm_value, direction):
     """
@@ -22,9 +29,9 @@ def convert_dm_to_decimal(dm_value, direction):
 class VesselNavigator:
     def __init__(self,
                  serial_connection,
-                 baud_rate: int = 115200,
-                 acceptance_radius: float = 3.0,
-                 lookhead_distance: float = 10.0):
+                 baud_rate: int = DEFAULT_BAUD_RATE,
+                 acceptance_radius: float = DEFAULT_ACCEPTANCE_RADIUS,
+                 lookhead_distance: float = DEFAULT_LOOKAHEAD_DISTANCE):
         """
         Initialize the navigation system.
         """
@@ -34,6 +41,7 @@ class VesselNavigator:
         self.waypoints: List[Waypoint] = []
         self.baud_rate = baud_rate
         self.running = False
+        self.navigation_active = False  # Flag to track if navigation is active
         self.serial_connection = serial_connection
 
         # These attributes hold the latest parsed NMEA data.
@@ -42,7 +50,7 @@ class VesselNavigator:
         self.current_heading = 0.0
         self.current_speed = 0.0
 
-    def load_waypoints_from_file(self, waypoint_file_path: str):
+    def load_waypoints_from_file(self, waypoint_file_path: str = WAYPOINT_FILE_PATH):
         with open(waypoint_file_path, 'r', encoding='utf-8') as f:
             while line := f.readline():
                 waypoint_sentence = line.rstrip()
@@ -51,7 +59,7 @@ class VesselNavigator:
         self.current_waypoint_index = 0
 
     def setup(self):
-        self.load_waypoints_from_file("waypoints.txt")
+        self.load_waypoints_from_file()
 
     def add_waypoint(self, waypoint: Waypoint):
         """Add a waypoint (latitude, longitude, and name)."""
@@ -92,30 +100,24 @@ class VesselNavigator:
 
     def _nmea_loop(self):
         while self.running:
-            if self.serial_connection.in_waiting:
+            # Keep reading until no more lines are waiting
+            while self.serial_connection.in_waiting > 0:
                 line = self.serial_connection.readline().decode('ascii', errors='replace').strip()
                 try:
                     msg = pynmea2.parse(line)
                     if msg.sentence_type == "RMC":
                         self.current_lat = convert_dm_to_decimal(msg.lat, msg.lat_dir)
                         self.current_lon = convert_dm_to_decimal(msg.lon, msg.lon_dir)
-                        try:
-                            self.current_speed = float(msg.spd_over_grnd)
-                        except (ValueError, TypeError):
-                            pass
-                        # Remove or comment out this block so heading is not updated from RMC:
-                        # try:
-                        #     self.current_heading = float(msg.true_course)
-                        # except (ValueError, TypeError):
-                        #     pass
+                        self.current_speed = float(msg.spd_over_grnd) if msg.spd_over_grnd else 0.0
                     elif msg.sentence_type == "HDT":
-                        try:
-                            self.current_heading = float(msg.heading)
-                        except (ValueError, TypeError):
-                            pass
+                        # Print the HDT sentence to the console every time one arrives
+                        print("Got HDT:", line)
+                        self.current_heading = float(msg.heading) if msg.heading else self.current_heading
                 except pynmea2.nmea.ParseError:
                     pass
-            time.sleep(0.05)
+
+            # Sleep briefly so we don’t spin the CPU at 100%
+            time.sleep(0.01)
 
 
     def get_status(self):
@@ -127,7 +129,6 @@ class VesselNavigator:
             "heading": self.current_heading,
         }
 
-    # Existing methods for sending commands remain unchanged.
     def send_nmea_command(self, command):
         checksum = 0
         for char in command[1:]:
@@ -137,8 +138,10 @@ class VesselNavigator:
         print(f"Sent: {command_str.strip()}")
 
     def start_navigation(self):
+        self.navigation_active = True
         self.send_nmea_command("$CCNVO,2,1.0,0,0.0")
 
     def stop_navigation(self):
+        self.navigation_active = False
         self.running = False
         self.send_nmea_command("$CCNVO,0,1.0,0,0.0")
